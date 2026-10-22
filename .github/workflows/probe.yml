@@ -1,0 +1,19 @@
+name: KIM relay probe
+
+# Feasibility check: does the KMA API answer a GitHub-hosted runner, and how fast?
+on:
+  push:
+    branches: [main]
+    paths: [probe_kma.py, .github/workflows/probe.yml]
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Probe KMA API
+        env:
+          KMA_API_KEY: ${{ secrets.KMA_API_KEY }}
+        run: python3 probe_kma.py
