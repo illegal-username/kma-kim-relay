@@ -5,7 +5,37 @@
 「KMA 3D 종관 일기도」가 기상청 API를 직접 기다리지 않고 이 파일을 받아 씁니다.
 
 **출처: 기상청** — 기상청 API허브 「수치모델 자료」의 KIM 전구모델 자료를 이 저장소에서 재가공했습니다
-(1/12° 격자를 0.25° 간격으로 솎아내고 압축). 원자료는 [기상청 API허브](https://apihub.kma.go.kr)에서 받을 수 있습니다.
-가공된 자료는 원자료와 다르며, 공식 예보가 아닙니다.
+(1/12° 격자를 3칸 간격(0.25°)으로 추출하고 16비트로 양자화해 압축). 원자료는
+[기상청 API허브](https://apihub.kma.go.kr)에서 받을 수 있습니다. 가공된 자료는 원자료와 다르며, 공식 예보가 아닙니다.
 
-(작업 중: 지금은 GitHub Actions 서버에서 기상청 API가 응답하는지 시험하는 단계입니다.)
+## 동작
+
+- [relay.yml](.github/workflows/relay.yml)이 매시간 [kim_relay.py](kim_relay.py)를 실행합니다.
+- 가장 최신 KIM 주기에서 아직 올리지 않은 예보 시각(+0–48 h, 3시간 간격)을 받아
+  릴리스 `kim-<주기>`에 시각마다 파일 하나로 올리고, 릴리스 `index`의 `manifest.json`을 갱신합니다.
+- 최신 2개 주기만 남기고 이전 주기 릴리스는 지웁니다.
+- 인증키는 저장소 Secret `KMA_API_KEY`에만 있습니다.
+
+## 파일 형식
+
+`manifest.json`
+
+```json
+{"format": 1, "attribution": "출처: 기상청 ...", "updated": "...",
+ "cycles": [{"cycle": "2026102218", "tag": "kim-2026102218",
+             "leads": {"0": {"file": "kim-2026102218-f000.kimr", "bytes": 1717437, "missing": []}}}]}
+```
+
+`.kimr` (little endian): `"KIMR"`, 형식 버전(1 B), 예약 3 B, 머리글 길이(uint32), UTF-8 JSON 머리글,
+필드 자료. 머리글에는 출처 문구, 주기·예보 시각, 격자(241×201, 원 격자 3칸 간격), 필드 목록
+(`name`, `level`, 자료 영역 안의 `offset`/`length`)과 받지 못한 필드(`missing`)가 있습니다.
+필드마다 앱의 KQ16 형식(값을 0.1 gpm·0.01 K·0.01 m/s·1 Pa 단위 정수로 바꿔 행 방향 차분 후 zlib)입니다.
+
+필드: 지위고도 `hgt`·기온 `T`·바람 `u`/`v` × 1000/950/925/850/700/500/300/200/100 hPa, 해면기압 `psl`, 지표기압 `ps`.
+
+## 직접 실행
+
+```bash
+pip install numpy
+KMA_API_KEY=... python kim_relay.py --leads 0 --out out --dry-run
+```
