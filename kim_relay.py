@@ -442,7 +442,15 @@ def main():
     leads = [int(item) for item in args.leads.split(",")] if args.leads else LEADS
     cycle = args.cycle
     if not cycle:
-        cycle = next((c for c in candidate_cycles() if cycle_exists(key, c)), None)
+        cycle = None
+        for candidate in candidate_cycles():
+            try:
+                if cycle_exists(key, candidate):
+                    cycle = candidate
+                    break
+            except Failed as error:
+                # KMA stalled even on the tiny probe: an older cycle is checked, this one next run.
+                log("could not tell whether %s exists: %s" % (candidate, error))
         if not cycle:
             log("no recent KIM cycle answered")
             return
