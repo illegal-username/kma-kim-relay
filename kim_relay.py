@@ -3,7 +3,9 @@
 Each run looks for the newest KIM cycle, fetches the leads that are not published yet
 (or were published with fields missing, of which only the missing ones are fetched again)
 and uploads one bundle per lead to the GitHub release "kim-<cycle>", then rewrites
-manifest.json on the release "index". Fields that fail are retried in a few rounds within
+manifest.json, the only file of the branch "manifest-kim". Bundle names carry a hash of
+their content and are never overwritten, and the manifest lives in git rather than as a
+release asset: replacing a release asset leaves its URL answering 404 for a while. Fields that fail are retried in a few rounds within
 the run and again by the next run. A cycle is marked "complete" once every lead has every
 field; the app shows only complete cycles, so it never has to ask KMA itself. Cycles from
 the newest down to the newest complete one are kept (at most three).
@@ -16,6 +18,7 @@ window (241x201, 0.25 deg), each field in the app's KQ16 format (FieldCodec.java
 original KMA data and not an official forecast; the bundle header and the manifest say so.
 """
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -59,7 +62,10 @@ ATTRIBUTION = (
     "16비트로 양자화해 압축했습니다. 원자료와 다르며 공식 예보가 아닙니다."
 )
 REPO = os.environ.get("GITHUB_REPOSITORY", "illegal-username/kma-kim-relay")
-INDEX_TAG = "index"
+INDEX_TAG = "index"  # held the manifests before 2026-10-23; no longer updated
+# Each manifest is the only file of its own branch (force-pushed), read by the app from
+# raw.githubusercontent.com.
+MANIFEST_BRANCHES = {"manifest.json": "manifest-kim", "gfs-manifest.json": "manifest-gfs"}
 KEEP_CYCLES = 3
 WORKERS = 6
 # A stalled KMA request usually answers at once when sent again, so attempts start short.
@@ -273,6 +279,12 @@ def gh(*args, check=True):
 
 
 def load_manifest(name="manifest.json", attribution=ATTRIBUTION):
+    # From the git API (no CDN delay), else the release asset of older runs.
+    result = subprocess.run(["gh", "api", "-H", "Accept: application/vnd.github.raw",
+                             "repos/%s/contents/%s?ref=%s" % (REPO, name, MANIFEST_BRANCHES[name])],
+                            capture_output=True, text=True, encoding="utf-8")
+    if result.returncode == 0 and result.stdout.startswith("{"):
+        return json.loads(result.stdout)
     with tempfile.TemporaryDirectory() as folder:
         result = gh("release", "download", INDEX_TAG, "-p", name, "-D", folder, check=False)
         path = Path(folder) / name
@@ -287,7 +299,7 @@ def ensure_release(tag, title, notes):
 
 
 def publish(manifest, folder, uploads, dry_run, name="manifest.json"):
-    """Upload the files, then the manifest `name` (KIM: manifest.json) to the release "index"."""
+    """Upload the files, then the manifest `name` (KIM: manifest.json) to its branch."""
     manifest["updated"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
     path = Path(folder) / name
     path.write_text(json.dumps(manifest, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -296,8 +308,29 @@ def publish(manifest, folder, uploads, dry_run, name="manifest.json"):
         return
     for tag, file in uploads:
         gh("release", "upload", tag, file, "--clobber")
-    ensure_release(INDEX_TAG, "Relay index", "manifest.json: 출처 기상청 KIM (재가공) · gfs-manifest.json: NOAA GFS")
-    gh("release", "upload", INDEX_TAG, str(path), "--clobber")
+    push_manifest(path, name)
+
+
+def push_manifest(path, name):
+    """Replace the branch of manifest `name` with one commit holding just that file."""
+    branch = MANIFEST_BRANCHES[name]
+    token = os.environ.get("GH_TOKEN", "")
+    url = ("https://x-access-token:%s@github.com/%s.git" % (token, REPO)) if token else "https://github.com/%s.git" % REPO
+    with tempfile.TemporaryDirectory() as repo:
+        shutil.copy(path, Path(repo) / name)
+        steps = [
+            ["init", "-q", "-b", branch],
+            ["add", name],
+            ["-c", "user.name=github-actions[bot]", "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com",
+             "commit", "-q", "-m", "Update " + name],
+            ["push", "-q", "--force", url, "HEAD:refs/heads/" + branch],
+        ]
+        for step in steps:
+            result = subprocess.run(["git", *step], cwd=repo, capture_output=True, text=True)
+            if result.returncode:
+                # The push URL holds the token: report the step, not the command.
+                raise RuntimeError("git %s failed: %s" % (step[0] if step[0] != "-c" else "commit",
+                                                         result.stderr.replace(token, "***") if token else result.stderr))
 
 
 def cycle_age_hours(cycle):
@@ -365,8 +398,10 @@ def run(key, cycle, leads, out_dir, dry_run, time_budget):
         if previous and len(grids) == len(have):
             log("+%dh still missing %s; kept the published bundle" % (lead, missing))
             continue
-        file = Path(out_dir) / ("kim-%s-f%03d.kimr" % (cycle, lead))
-        file.write_bytes(build_bundle(cycle, lead, grids, missing))
+        data = build_bundle(cycle, lead, grids, missing)
+        # A new name for every version: an app that read the previous manifest still finds its file.
+        file = Path(out_dir) / ("kim-%s-f%03d-%s.kimr" % (cycle, lead, hashlib.sha256(data).hexdigest()[:8]))
+        file.write_bytes(data)
         entry["leads"][str(lead)] = {"file": file.name, "bytes": file.stat().st_size, "missing": missing,
                                      "fields": len(FIELDS)}
         # The app switches to a cycle only once it is complete, so a lead published now is

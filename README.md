@@ -12,7 +12,11 @@
 
 - [relay.yml](.github/workflows/relay.yml)이 30분마다 [kim_relay.py](kim_relay.py)를 실행합니다.
 - 가장 최신 KIM 주기에서 아직 올리지 않은 예보 시각(+0–48 h, 3시간 간격)을 받아
-  릴리스 `kim-<주기>`에 시각마다 파일 하나로 올리고, 릴리스 `index`의 `manifest.json`을 갱신합니다.
+  릴리스 `kim-<주기>`에 시각마다 파일 하나로 올리고, 목록 `manifest.json`을 갱신합니다.
+- 목록은 브랜치 `manifest-kim`(GFS는 `manifest-gfs`)의 유일한 파일이고, 앱은
+  `https://raw.githubusercontent.com/illegal-username/kma-kim-relay/manifest-kim/manifest.json`에서 읽습니다.
+  릴리스 첨부 파일을 덮어쓰면 그 주소가 한동안 404가 되기 때문입니다. 같은 이유로 중계 파일 이름에는 내용 해시가
+  붙고(`kim-<주기>-fLLL-<해시>.kimr`) 한 번 올린 파일은 덮어쓰지 않습니다.
 - 실패한 필드는 같은 실행 안에서 간격을 두고 몇 번 더 받고, 그래도 빠진 필드는 다음 실행이
   이미 올린 파일에 그 필드만 채워 다시 올립니다(나머지 필드는 다시 받지 않음).
 - 17개 시각 × 47필드가 모두 모이면 그 주기에 `"complete": true`를 붙입니다. 앱은 완성된 주기만
@@ -26,7 +30,7 @@
 [gfs-relay.yml](.github/workflows/gfs-relay.yml)이 30분마다 [gfs_relay.py](gfs_relay.py)를 실행합니다.
 앱과 **똑같은 NOMADS grib filter 요청**(100–160°E, 5–55°N, 9개 층 HGT/TMP/UGRD/VGRD/RH, 지표 PRES, PRMSL)을
 요청 사이 10초를 두고 보내, 받은 GRIB2를 **그대로** 릴리스 `gfs-<주기>`에 `gfs-<주기>-fLLL-v1.grib2`로 올립니다
-(앱 캐시 파일과 같은 이름·내용). 목록은 릴리스 `index`의 `gfs-manifest.json`(형식은 `manifest.json`과 같음)입니다.
+(앱 캐시 파일과 같은 이름·내용). 목록은 브랜치 `manifest-gfs`의 `gfs-manifest.json`(형식은 `manifest.json`과 같음)입니다.
 17개 시각이 모두 올라오면 완성 표시를 하고, 앱은 완성된 주기만 씁니다.
 
 자료: NOAA/NCEP GFS 0.25° (public domain). NOAA는 이 저장소나 앱을 보증하지 않습니다.
@@ -38,7 +42,7 @@
 ```json
 {"format": 1, "attribution": "출처: 기상청 ...", "updated": "...",
  "cycles": [{"cycle": "2026102218", "tag": "kim-2026102218", "complete": true,
-             "leads": {"0": {"file": "kim-2026102218-f000.kimr", "bytes": 1717437, "missing": []}}}]}
+             "leads": {"0": {"file": "kim-2026102218-f000-1a2b3c4d.kimr", "bytes": 1717437, "missing": [], "fields": 47}}}]}
 ```
 
 `.kimr` (little endian): `"KIMR"`, 형식 버전(1 B), 예약 3 B, 머리글 길이(uint32), UTF-8 JSON 머리글,
