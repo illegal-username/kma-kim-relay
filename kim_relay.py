@@ -8,8 +8,8 @@ the run and again by the next run. A cycle is marked "complete" once every lead 
 field; the app shows only complete cycles, so it never has to ask KMA itself. Cycles from
 the newest down to the newest complete one are kept (at most three).
 
-A bundle ("KIMR") holds the 38 fields of one lead -- height, temperature and wind on 9
-pressure levels, MSLP and surface pressure -- on every third point of the app's 721x601
+A bundle ("KIMR") holds the 47 fields of one lead -- height, temperature, wind and
+relative humidity on 9 pressure levels, MSLP and surface pressure -- on every third point of the app's 721x601
 window (241x201, 0.25 deg), each field in the app's KQ16 format (FieldCodec.java).
 
 출처: 기상청. The data is re-processed here (thinned and quantised), so it is not the
@@ -49,6 +49,8 @@ FIELDS = (
     [("hgt", "P", level, True, 1) for level in LEVELS]
     + [("psl", "U", 0, True, 0), ("ps", "U", 0, False, 0)]
     + [(name, "P", level, False, 2) for name in ("T", "u", "v") for level in LEVELS]
+    # Relative humidity (%, 0.1 steps): the app's cloud (humid air) layer.
+    + [("rh", "P", level, False, 1) for level in LEVELS]
 )
 FORMAT = 1
 ATTRIBUTION = (
@@ -335,7 +337,9 @@ def run(key, cycle, leads, out_dir, dry_run, time_budget):
     if entry is None:
         entry = {"cycle": cycle, "tag": "kim-" + cycle, "leads": {}}
         manifest["cycles"].append(entry)
-    todo = [lead for lead in leads if str(lead) not in entry["leads"] or entry["leads"][str(lead)]["missing"]]
+    # Bundles of an older field list (no "fields" count) get the new fields added too.
+    todo = [lead for lead in leads if str(lead) not in entry["leads"] or entry["leads"][str(lead)]["missing"]
+            or entry["leads"][str(lead)].get("fields", 0) < len(FIELDS)]
     log("cycle", cycle, "to fetch:", todo)
     if not todo:
         return 0
@@ -358,12 +362,13 @@ def run(key, cycle, leads, out_dir, dry_run, time_budget):
         except Failed as error:
             log("+%dh failed:" % lead, error)
             continue
-        if previous and len(missing) >= len(previous["missing"]):
+        if previous and len(grids) == len(have):
             log("+%dh still missing %s; kept the published bundle" % (lead, missing))
             continue
         file = Path(out_dir) / ("kim-%s-f%03d.kimr" % (cycle, lead))
         file.write_bytes(build_bundle(cycle, lead, grids, missing))
-        entry["leads"][str(lead)] = {"file": file.name, "bytes": file.stat().st_size, "missing": missing}
+        entry["leads"][str(lead)] = {"file": file.name, "bytes": file.stat().st_size, "missing": missing,
+                                     "fields": len(FIELDS)}
         # The app switches to a cycle only once it is complete, so a lead published now is
         # used when the last one is in.
         entry["complete"] = is_complete(entry)
