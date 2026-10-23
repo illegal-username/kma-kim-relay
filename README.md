@@ -24,6 +24,10 @@
   필드는 포기하고 완성으로 표시합니다(앱이 빠진 자료를 표시).
 - 최신 주기부터 가장 최근의 완성 주기까지(최대 3개)만 남기고 이전 주기 릴리스는 지웁니다.
 - 인증키는 저장소 Secret `KMA_API_KEY`에만 있습니다.
+- **실행 시작:** GitHub의 `schedule:`은 몇 시간씩 늦거나 빠질 수 있어(2026-10-23에는 한 번도 돌지 않음), 늘 켜져 있는
+  PC의 Windows 작업 스케줄러 작업 `KMA relay trigger`가 30분마다(:17, :47) [tools/trigger-relays.ps1](tools/trigger-relays.ps1)로
+  두 워크플로를 실행시킵니다(로그인된 GitHub CLI 사용, 로그 `tools/trigger-relays.log`). `schedule:`은 예비로 남겨 둡니다.
+  PC가 꺼져 있으면 새 주기가 완성되지 않고, 앱은 반나절 뒤부터 기상청·NOMADS에서 직접 받습니다.
 
 ## GFS
 
