@@ -155,6 +155,8 @@ def main():
     manifest = load_manifest(MANIFEST, ATTRIBUTION)
     manifest["attribution"] = ATTRIBUTION
     try:
+        if MANIFEST in relay.UNMIGRATED and manifest["cycles"]:
+            publish(manifest, out_dir, [], args.dry_run, name=MANIFEST)
         for cycle in [args.cycle] if args.cycle else candidate_cycles():
             entry = next((c for c in manifest["cycles"] if c["cycle"] == cycle), None)
             if entry and entry.get("complete") and not args.cycle:

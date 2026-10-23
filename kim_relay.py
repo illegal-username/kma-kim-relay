@@ -66,6 +66,8 @@ INDEX_TAG = "index"  # held the manifests before 2026-10-23; no longer updated
 # Each manifest is the only file of its own branch (force-pushed), read by the app from
 # raw.githubusercontent.com.
 MANIFEST_BRANCHES = {"manifest.json": "manifest-kim", "gfs-manifest.json": "manifest-gfs"}
+# Manifests read from the old release asset, to be pushed to their branch once.
+UNMIGRATED = set()
 KEEP_CYCLES = 3
 WORKERS = 6
 # A stalled KMA request usually answers at once when sent again, so attempts start short.
@@ -285,6 +287,7 @@ def load_manifest(name="manifest.json", attribution=ATTRIBUTION):
                             capture_output=True, text=True, encoding="utf-8")
     if result.returncode == 0 and result.stdout.startswith("{"):
         return json.loads(result.stdout)
+    UNMIGRATED.add(name)
     with tempfile.TemporaryDirectory() as folder:
         result = gh("release", "download", INDEX_TAG, "-p", name, "-D", folder, check=False)
         path = Path(folder) / name
@@ -375,6 +378,8 @@ def run(key, cycle, leads, out_dir, dry_run, time_budget):
             or entry["leads"][str(lead)].get("fields", 0) < len(FIELDS)]
     log("cycle", cycle, "to fetch:", todo)
     if not todo:
+        if "manifest.json" in UNMIGRATED:
+            publish(manifest, out_dir, [], dry_run)
         return 0
     if not dry_run:
         ensure_release(entry["tag"], "KIM " + cycle, ATTRIBUTION)
@@ -416,6 +421,8 @@ def run(key, cycle, leads, out_dir, dry_run, time_budget):
         # Gaps given up on with time: mark complete without a new bundle.
         entry["complete"] = True
         drop_old_cycles(manifest, dry_run)
+        publish(manifest, out_dir, [], dry_run)
+    elif "manifest.json" in UNMIGRATED and not done:
         publish(manifest, out_dir, [], dry_run)
     log("cycle %s %s" % (cycle, "complete" if entry.get("complete") else "not complete yet"))
     return done
