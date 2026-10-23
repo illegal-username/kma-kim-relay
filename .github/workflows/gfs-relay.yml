@@ -1,0 +1,40 @@
+name: GFS relay
+
+# Every 30 minutes: fetch the leads of the newest GFS cycle not published yet, 10 s apart
+# as NOMADS asks (a whole cycle takes about 3 minutes). GFS +0 h appears 3.5-4.7 h after
+# the cycle; a run with nothing to do takes seconds. Runs queue, never overlap.
+on:
+  schedule:
+    - cron: "7,37 * * * *"
+  workflow_dispatch:
+    inputs:
+      cycle:
+        description: "YYYYMMDDHH (empty: newest)"
+        required: false
+      leads:
+        description: "comma separated leads (empty: 0-48 h)"
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gfs-relay
+  cancel-in-progress: false
+
+jobs:
+  relay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --quiet numpy
+      - name: Fetch and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CYCLE: ${{ inputs.cycle }}
+          LEADS: ${{ inputs.leads }}
+        run: python gfs_relay.py ${CYCLE:+--cycle "$CYCLE"} ${LEADS:+--leads "$LEADS"}

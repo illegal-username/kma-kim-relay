@@ -270,12 +270,12 @@ def gh(*args, check=True):
     return subprocess.run(["gh", *args, "-R", REPO], check=check, capture_output=True, text=True)
 
 
-def load_manifest():
+def load_manifest(name="manifest.json", attribution=ATTRIBUTION):
     with tempfile.TemporaryDirectory() as folder:
-        result = gh("release", "download", INDEX_TAG, "-p", "manifest.json", "-D", folder, check=False)
-        path = Path(folder) / "manifest.json"
+        result = gh("release", "download", INDEX_TAG, "-p", name, "-D", folder, check=False)
+        path = Path(folder) / name
         if result.returncode or not path.exists():
-            return {"format": FORMAT, "attribution": ATTRIBUTION, "cycles": []}
+            return {"format": FORMAT, "attribution": attribution, "cycles": []}
         return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -284,16 +284,17 @@ def ensure_release(tag, title, notes):
         gh("release", "create", tag, "--title", title, "--notes", notes, "--latest=false")
 
 
-def publish(manifest, folder, uploads, dry_run):
+def publish(manifest, folder, uploads, dry_run, name="manifest.json"):
+    """Upload the files, then the manifest `name` (KIM: manifest.json) to the release "index"."""
     manifest["updated"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    path = Path(folder) / "manifest.json"
+    path = Path(folder) / name
     path.write_text(json.dumps(manifest, ensure_ascii=False, indent=1), encoding="utf-8")
     if dry_run:
-        log("dry run: would upload", [Path(p).name for _t, p in uploads], "and manifest.json")
+        log("dry run: would upload", [Path(p).name for _t, p in uploads], "and", name)
         return
     for tag, file in uploads:
         gh("release", "upload", tag, file, "--clobber")
-    ensure_release(INDEX_TAG, "KIM relay index", ATTRIBUTION)
+    ensure_release(INDEX_TAG, "Relay index", "manifest.json: 출처 기상청 KIM (재가공) · gfs-manifest.json: NOAA GFS")
     gh("release", "upload", INDEX_TAG, str(path), "--clobber")
 
 

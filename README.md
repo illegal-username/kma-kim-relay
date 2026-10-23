@@ -21,6 +21,16 @@
 - 최신 주기부터 가장 최근의 완성 주기까지(최대 3개)만 남기고 이전 주기 릴리스는 지웁니다.
 - 인증키는 저장소 Secret `KMA_API_KEY`에만 있습니다.
 
+## GFS
+
+[gfs-relay.yml](.github/workflows/gfs-relay.yml)이 30분마다 [gfs_relay.py](gfs_relay.py)를 실행합니다.
+앱과 **똑같은 NOMADS grib filter 요청**(100–160°E, 5–55°N, 9개 층 HGT/TMP/UGRD/VGRD/RH, 지표 PRES, PRMSL)을
+요청 사이 10초를 두고 보내, 받은 GRIB2를 **그대로** 릴리스 `gfs-<주기>`에 `gfs-<주기>-fLLL-v1.grib2`로 올립니다
+(앱 캐시 파일과 같은 이름·내용). 목록은 릴리스 `index`의 `gfs-manifest.json`(형식은 `manifest.json`과 같음)입니다.
+17개 시각이 모두 올라오면 완성 표시를 하고, 앱은 완성된 주기만 씁니다.
+
+자료: NOAA/NCEP GFS 0.25° (public domain). NOAA는 이 저장소나 앱을 보증하지 않습니다.
+
 ## 파일 형식
 
 `manifest.json`
