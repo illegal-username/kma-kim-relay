@@ -1,9 +1,12 @@
 """Pre-fetch KMA KIM forecast fields for East Asia and publish them as compact bundles.
 
 Each run looks for the newest KIM cycle, fetches the leads that are not published yet
-(or were published with fields missing) and uploads one bundle per lead to the GitHub
-release "kim-<cycle>", then rewrites manifest.json on the release "index". Only the two
-newest cycles are kept.
+(or were published with fields missing, of which only the missing ones are fetched again)
+and uploads one bundle per lead to the GitHub release "kim-<cycle>", then rewrites
+manifest.json on the release "index". Fields that fail are retried in a few rounds within
+the run and again by the next run. A cycle is marked "complete" once every lead has every
+field; the app shows only complete cycles, so it never has to ask KMA itself. Cycles from
+the newest down to the newest complete one are kept (at most three).
 
 A bundle ("KIMR") holds the 38 fields of one lead -- height, temperature and wind on 9
 pressure levels, MSLP and surface pressure -- on every third point of the app's 721x601
@@ -55,10 +58,15 @@ ATTRIBUTION = (
 )
 REPO = os.environ.get("GITHUB_REPOSITORY", "illegal-username/kma-kim-relay")
 INDEX_TAG = "index"
-KEEP_CYCLES = 2
+KEEP_CYCLES = 3
 WORKERS = 6
 # A stalled KMA request usually answers at once when sent again, so attempts start short.
 ATTEMPT_TIMEOUTS = (8, 15, 30, 45)
+# Pauses before each round over the fields of a lead still missing (the first is the pass itself).
+RETRY_ROUND_PAUSES = (0, 15, 45, 90)
+# Fields KMA still has not given this long after the cycle are given up, so the cycle can
+# be marked complete (the app shows the gap) rather than block the app on older data.
+GIVE_UP_HOURS = 10
 AVAILABILITY_LAG_HOURS = 3
 PROBE_CANDIDATES = 3
 
@@ -168,17 +176,20 @@ def kq16_decode(blob):
 # ------------------------------------------------------------------ bundle
 
 def build_bundle(cycle, lead, grids, missing):
-    """KIMR: magic, format, 3 reserved bytes, header length, JSON header, KQ16 fields."""
+    """KIMR: magic, format, 3 reserved bytes, header length, JSON header, KQ16 fields.
+
+    `grids` are already thinned (every STRIDE-th point), as fetch_lead and read_bundle give them.
+    """
     blobs, entries, offset = [], [], 0
     for name, _data, level, _required, decimals in FIELDS:
         grid = grids.get((name, level))
         if grid is None:
             continue
-        blob = kq16_encode(grid[::STRIDE, ::STRIDE], decimals)
+        blob = kq16_encode(grid, decimals)
         entries.append({"name": name, "level": level, "offset": offset, "length": len(blob)})
         blobs.append(blob)
         offset += len(blob)
-    sub_ny, sub_nx = next(iter(grids.values()))[::STRIDE, ::STRIDE].shape
+    sub_ny, sub_nx = next(iter(grids.values())).shape
     header = {
         "format": FORMAT, "attribution": ATTRIBUTION, "model": "KIMG/NE57", "cycle": cycle, "lead": lead,
         "window": WINDOW, "stride": STRIDE, "nx": sub_nx, "ny": sub_ny, "levels": LEVELS,
@@ -199,30 +210,58 @@ def read_bundle(data):
     return header, fields
 
 
-def fetch_lead(key, cycle, lead):
-    """All fields of one lead; raises Missing if KMA has not produced the lead yet."""
+def fetch_lead(key, cycle, lead, have=None):
+    """
+    The fields of one lead (thinned) on top of `have`, the ones already published. Fields
+    that fail are tried again in later rounds, a little apart, since KMA stalls come and go.
+    Raises Missing if KMA has not produced the lead yet.
+    """
+    grids = dict(have or {})
+    todo = [spec for spec in FIELDS if (spec[0], spec[2]) not in grids]
+    if not todo:
+        return grids, []
     fetch(key, cycle, lead, "hgt", "P", 500, window=PROBE_WINDOW, size=(1, 1))
-    grids, errors = {}, {}
+    errors = {}
     lock = threading.Lock()
 
     def one(spec):
         name, data, level, _required, _decimals = spec
         try:
-            grid = fetch(key, cycle, lead, name, data, level)
+            grid = fetch(key, cycle, lead, name, data, level)[::STRIDE, ::STRIDE].copy()
             with lock:
                 grids[(name, level)] = grid
+                errors.pop((name, level), None)
         except (Missing, Failed) as error:
             with lock:
                 errors[(name, level)] = str(error)
 
-    with ThreadPoolExecutor(WORKERS) as pool:
-        list(pool.map(one, FIELDS))
+    for round_index, pause in enumerate(RETRY_ROUND_PAUSES):
+        if round_index:
+            log("+%dh: %d field(s) again in %d s (%s)" % (
+                lead, len(todo), pause, ", ".join("%s %d" % (s[0], s[2]) for s in todo)))
+            time.sleep(pause)
+        with ThreadPoolExecutor(WORKERS) as pool:
+            list(pool.map(one, todo))
+        todo = [spec for spec in FIELDS if (spec[0], spec[2]) not in grids]
+        if not todo:
+            break
     required = [(name, level) for name, _d, level, req, _q in FIELDS if req and (name, level) not in grids]
     missing = ["%s %d" % (name, level) for name, _d, level, _r, _q in FIELDS if (name, level) not in grids]
     if required:
         raise Failed("required fields missing: %s (%s)" % (
-            ", ".join("%s %d" % item for item in required), errors[required[0]]))
+            ", ".join("%s %d" % item for item in required), errors.get(required[0], "")))
     return grids, missing
+
+
+def published_fields(tag, file):
+    """The fields of a bundle already on the release (KQ16 decodes and re-encodes exactly)."""
+    url = "https://github.com/%s/releases/download/%s/%s" % (REPO, tag, file)
+    try:
+        with urlopen(Request(url, headers={"User-Agent": "kma-kim-relay"}), timeout=60) as response:
+            return read_bundle(response.read())[1]
+    except Exception as error:  # noqa: BLE001 - fetch everything again instead
+        log("could not reuse %s: %s" % (file, error))
+        return {}
 
 
 # ------------------------------------------------------------------ GitHub release storage
@@ -258,9 +297,29 @@ def publish(manifest, folder, uploads, dry_run):
     gh("release", "upload", INDEX_TAG, str(path), "--clobber")
 
 
+def cycle_age_hours(cycle):
+    start = datetime.strptime(cycle, "%Y%m%d%H").replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - start).total_seconds() / 3600
+
+
+def is_complete(entry):
+    """Every lead is published with every field, or the rest are given up (GIVE_UP_HOURS)."""
+    leads = entry["leads"]
+    if any(str(lead) not in leads for lead in LEADS):
+        return False
+    return cycle_age_hours(entry["cycle"]) > GIVE_UP_HOURS or not any(item["missing"] for item in leads.values())
+
+
 def drop_old_cycles(manifest, dry_run):
-    keep = sorted(manifest["cycles"], key=lambda c: c["cycle"], reverse=True)[:KEEP_CYCLES]
-    for entry in manifest["cycles"]:
+    """Keep the cycles from the newest down to the newest complete one (the one the app shows)."""
+    ordered = sorted(manifest["cycles"], key=lambda c: c["cycle"], reverse=True)
+    keep = []
+    for entry in ordered:
+        keep.append(entry)
+        if entry.get("complete"):
+            break
+    keep = keep[:KEEP_CYCLES]
+    for entry in ordered:
         if entry not in keep and not dry_run:
             gh("release", "delete", entry["tag"], "--yes", "--cleanup-tag", check=False)
     manifest["cycles"] = keep
@@ -287,27 +346,37 @@ def run(key, cycle, leads, out_dir, dry_run, time_budget):
             log("time budget used up; the next run continues")
             break
         lead_started = time.time()
+        previous = entry["leads"].get(str(lead))
+        # A bundle published with gaps: keep its fields and fetch only the missing ones.
+        have = published_fields(entry["tag"], previous["file"]) if previous and not dry_run else {}
         try:
-            grids, missing = fetch_lead(key, cycle, lead)
+            grids, missing = fetch_lead(key, cycle, lead, have)
         except Missing:
             log("+%dh not produced yet" % lead)
             break
         except Failed as error:
             log("+%dh failed:" % lead, error)
             continue
-        previous = entry["leads"].get(str(lead))
         if previous and len(missing) >= len(previous["missing"]):
             log("+%dh still missing %s; kept the published bundle" % (lead, missing))
             continue
         file = Path(out_dir) / ("kim-%s-f%03d.kimr" % (cycle, lead))
         file.write_bytes(build_bundle(cycle, lead, grids, missing))
         entry["leads"][str(lead)] = {"file": file.name, "bytes": file.stat().st_size, "missing": missing}
-        # Publishing after every lead lets the app use the first leads while the rest arrive.
+        # The app switches to a cycle only once it is complete, so a lead published now is
+        # used when the last one is in.
+        entry["complete"] = is_complete(entry)
         drop_old_cycles(manifest, dry_run)
         publish(manifest, out_dir, [(entry["tag"], str(file))], dry_run)
         done += 1
         log("+%dh published: %d bytes, %.0f s%s" % (lead, file.stat().st_size, time.time() - lead_started,
                                                    ", missing " + ", ".join(missing) if missing else ""))
+    if not entry.get("complete") and is_complete(entry):
+        # Gaps given up on with time: mark complete without a new bundle.
+        entry["complete"] = True
+        drop_old_cycles(manifest, dry_run)
+        publish(manifest, out_dir, [], dry_run)
+    log("cycle %s %s" % (cycle, "complete" if entry.get("complete") else "not complete yet"))
     return done
 
 

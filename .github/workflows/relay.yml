@@ -1,10 +1,11 @@
 name: KIM relay
 
-# Every hour: fetch the leads of the newest KIM cycle that are not published yet. KIM's
-# +0 h appears about 4-5 h after the cycle; a run with nothing to do takes seconds.
+# Every 30 minutes: fetch what the newest KIM cycle still lacks (leads, or fields that
+# failed). KIM's +0 h appears about 4-5 h after the cycle and a whole cycle takes about
+# 25 minutes; a run with nothing to do takes seconds. Runs queue, never overlap.
 on:
   schedule:
-    - cron: "17 * * * *"
+    - cron: "17,47 * * * *"
   workflow_dispatch:
     inputs:
       cycle:
