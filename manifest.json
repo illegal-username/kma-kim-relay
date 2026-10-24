@@ -1,0 +1,219 @@
+{
+ "format": 1,
+ "attribution": "출처: 기상청 (KIM 전구모델 KIMG/NE57, 기상청 API허브 수치모델 자료). kma-kim-relay에서 재가공: 동아시아 영역을 1/12° 격자에서 3칸 간격(0.25°)으로 추출하고 16비트로 양자화해 압축했습니다. 원자료와 다르며 공식 예보가 아닙니다.",
+ "cycles": [
+  {
+   "cycle": "2026102406",
+   "tag": "kim-2026102406",
+   "leads": {
+    "3": {
+     "file": "kim-2026102406-f003-ffad45a2.kimr",
+     "bytes": 2091310,
+     "missing": [],
+     "fields": 47
+    },
+    "6": {
+     "file": "kim-2026102406-f006-d83d3eca.kimr",
+     "bytes": 2127143,
+     "missing": [],
+     "fields": 47
+    },
+    "9": {
+     "file": "kim-2026102406-f009-accd51be.kimr",
+     "bytes": 2145887,
+     "missing": [],
+     "fields": 47
+    },
+    "12": {
+     "file": "kim-2026102406-f012-d62c9a2b.kimr",
+     "bytes": 2162169,
+     "missing": [],
+     "fields": 47
+    },
+    "15": {
+     "file": "kim-2026102406-f015-f63a4b2d.kimr",
+     "bytes": 2166548,
+     "missing": [],
+     "fields": 47
+    },
+    "18": {
+     "file": "kim-2026102406-f018-a5964ebf.kimr",
+     "bytes": 2163153,
+     "missing": [],
+     "fields": 47
+    },
+    "21": {
+     "file": "kim-2026102406-f021-73b4062a.kimr",
+     "bytes": 2152633,
+     "missing": [],
+     "fields": 47
+    },
+    "24": {
+     "file": "kim-2026102406-f024-783dc33e.kimr",
+     "bytes": 2155386,
+     "missing": [],
+     "fields": 47
+    },
+    "27": {
+     "file": "kim-2026102406-f027-d70a14fa.kimr",
+     "bytes": 2161994,
+     "missing": [],
+     "fields": 47
+    },
+    "30": {
+     "file": "kim-2026102406-f030-8fb60091.kimr",
+     "bytes": 2170390,
+     "missing": [],
+     "fields": 47
+    },
+    "33": {
+     "file": "kim-2026102406-f033-fabb8cfb.kimr",
+     "bytes": 2176261,
+     "missing": [],
+     "fields": 47
+    },
+    "36": {
+     "file": "kim-2026102406-f036-4abc4665.kimr",
+     "bytes": 2173774,
+     "missing": [],
+     "fields": 47
+    },
+    "39": {
+     "file": "kim-2026102406-f039-584040b8.kimr",
+     "bytes": 2166720,
+     "missing": [],
+     "fields": 47
+    },
+    "42": {
+     "file": "kim-2026102406-f042-a8001da5.kimr",
+     "bytes": 2158713,
+     "missing": [],
+     "fields": 47
+    },
+    "0": {
+     "file": "kim-2026102406-f000-b1c8acf0.kimr",
+     "bytes": 1840758,
+     "missing": [
+      "T 850",
+      "rh 950",
+      "rh 925",
+      "rh 500",
+      "rh 300"
+     ],
+     "fields": 47
+    }
+   },
+   "complete": false
+  },
+  {
+   "cycle": "2026102400",
+   "tag": "kim-2026102400",
+   "leads": {
+    "0": {
+     "file": "kim-2026102400-f000-7a3da890.kimr",
+     "bytes": 2102004,
+     "missing": [],
+     "fields": 47
+    },
+    "3": {
+     "file": "kim-2026102400-f003-8acdcb9a.kimr",
+     "bytes": 2096746,
+     "missing": [],
+     "fields": 47
+    },
+    "6": {
+     "file": "kim-2026102400-f006-27871aa7.kimr",
+     "bytes": 2115781,
+     "missing": [],
+     "fields": 47
+    },
+    "9": {
+     "file": "kim-2026102400-f009-dd3b5753.kimr",
+     "bytes": 2136508,
+     "missing": [],
+     "fields": 47
+    },
+    "12": {
+     "file": "kim-2026102400-f012-7d8c019c.kimr",
+     "bytes": 2158987,
+     "missing": [],
+     "fields": 47
+    },
+    "15": {
+     "file": "kim-2026102400-f015-efc197e8.kimr",
+     "bytes": 2169820,
+     "missing": [],
+     "fields": 47
+    },
+    "18": {
+     "file": "kim-2026102400-f018-4a3347f5.kimr",
+     "bytes": 2180575,
+     "missing": [],
+     "fields": 47
+    },
+    "21": {
+     "file": "kim-2026102400-f021-7fa71d7a.kimr",
+     "bytes": 2179296,
+     "missing": [],
+     "fields": 47
+    },
+    "24": {
+     "file": "kim-2026102400-f024-f13203ca.kimr",
+     "bytes": 2174216,
+     "missing": [],
+     "fields": 47
+    },
+    "27": {
+     "file": "kim-2026102400-f027-e49ce55f.kimr",
+     "bytes": 2163184,
+     "missing": [],
+     "fields": 47
+    },
+    "30": {
+     "file": "kim-2026102400-f030-987e6052.kimr",
+     "bytes": 2165439,
+     "missing": [],
+     "fields": 47
+    },
+    "33": {
+     "file": "kim-2026102400-f033-ba22d14a.kimr",
+     "bytes": 2171612,
+     "missing": [],
+     "fields": 47
+    },
+    "36": {
+     "file": "kim-2026102400-f036-a37a9c7f.kimr",
+     "bytes": 2178907,
+     "missing": [],
+     "fields": 47
+    },
+    "39": {
+     "file": "kim-2026102400-f039-5fbfd38e.kimr",
+     "bytes": 2181419,
+     "missing": [],
+     "fields": 47
+    },
+    "42": {
+     "file": "kim-2026102400-f042-74f071a3.kimr",
+     "bytes": 2178259,
+     "missing": [],
+     "fields": 47
+    },
+    "45": {
+     "file": "kim-2026102400-f045-0468980e.kimr",
+     "bytes": 2173738,
+     "missing": [],
+     "fields": 47
+    },
+    "48": {
+     "file": "kim-2026102400-f048-feba4229.kimr",
+     "bytes": 2163084,
+     "missing": [],
+     "fields": 47
+    }
+   },
+   "complete": true
+  }
+ ],
+ "updated": "2026-10-24T10:19:46+00:00"
+}
