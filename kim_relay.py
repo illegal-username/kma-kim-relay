@@ -1,5 +1,9 @@
 """Pre-fetch KMA KIM forecast fields for East Asia and publish them as compact bundles.
 
+Fields are fetched as GRIB2 from KMA's lightweight API (25% less volume than the older
+binary API, same values), and fetching stops for the day at DAILY_BUDGET (4.9 GB, KMA allows
+5 GB a day), counted in manifest.json and reset at midnight KST.
+
 Each run looks for the newest KIM cycle, fetches the leads that are not published yet
 (or were published with fields missing, of which only the missing ones are fetched again)
 and uploads one bundle per lead to the GitHub release "kim-<cycle>", then rewrites
@@ -39,9 +43,15 @@ from urllib.request import Request, urlopen
 
 import numpy as np
 
+# Fields come as GRIB2 from the "lightweight" API: 24-bit packing, 25% smaller than the float32
+# of the older API with the same values (checked to 3e-5 K on 2026-10-26), which keeps four
+# cycles a day under KMA's daily volume limit. The older API stays for the tiny existence probes.
 URL = "https://apihub.kma.go.kr/api/typ06/cgi-bin/url/nph-kim_nc_xy_txt2_std"
+GRIB_URL = "https://apihub.kma.go.kr/api/typ06/url/nwp_nc_vars_down.php"
 # 100-160E, 5-55N of the g576 grid (1-based x_min,y_min,x_max,y_max): the app's window.
 WINDOW = "1201,1141,1921,1741"
+# The same 721x601 window by longitude/latitude; 55.05 so the northern row (55.04N) is in.
+BOX = dict(lon1=100, lat1=5, lon2=160, lat2=55.05)
 PROBE_WINDOW = "1201,1141,1201,1141"
 WIDTH, HEIGHT = 721, 601
 STRIDE = 3
@@ -72,6 +82,14 @@ KEEP_CYCLES = 3
 WORKERS = 6
 # A stalled KMA request usually answers at once when sent again, so attempts start short.
 ATTEMPT_TIMEOUTS = (8, 15, 30, 45)
+# The GRIB2 API takes up to a minute for a field it has not cut out yet (its gateway gives
+# 504 after 30 s) and then answers the same request at once.
+GRIB_ATTEMPT_TIMEOUTS = (30, 30, 45, 60)
+# KMA API허브 lets a general member receive 5 GB a day (reset at midnight KST); a 403 says
+# "일일 최대 호출 용량 제한" once it is used. The relay stops below that, at 4.9 GB, and the
+# next run after midnight KST goes on. The count is kept in manifest.json ("usage").
+DAILY_BUDGET = 4.9e9
+FIELD_BYTES = 1300142  # one GRIB2 field of the window
 # Pauses before each round over the fields of a lead still missing (the first is the pass itself).
 RETRY_ROUND_PAUSES = (0, 15, 45, 90)
 # Fields KMA still has not given this long after the cycle are given up, so the cycle can
@@ -97,9 +115,61 @@ class Failed(Exception):
     pass
 
 
+class OverBudget(Exception):
+    """Today's KMA volume (DAILY_BUDGET, or KMA's own limit) is used up."""
+
+
+# ------------------------------------------------------------------ daily volume
+
+def kst_day():
+    return (datetime.now(timezone.utc) + timedelta(hours=9)).strftime("%Y-%m-%d")
+
+
+USAGE = {"day": kst_day(), "bytes": 0}
+USAGE_LOCK = threading.Lock()
+
+
+def load_usage(manifest):
+    saved = manifest.get("usage") or {}
+    with USAGE_LOCK:
+        if saved.get("day") == kst_day():
+            USAGE.update(day=saved["day"], bytes=int(saved.get("bytes", 0)))
+
+
+def count_bytes(n=0, exhausted=False):
+    """Add n received bytes to today's count; `exhausted` (KMA said so) fills the day."""
+    with USAGE_LOCK:
+        if USAGE["day"] != kst_day():
+            USAGE.update(day=kst_day(), bytes=0)
+        USAGE["bytes"] += n
+        if exhausted:
+            USAGE["bytes"] = max(USAGE["bytes"], int(DAILY_BUDGET))
+
+
+def check_budget(expected=FIELD_BYTES):
+    count_bytes()
+    if USAGE["bytes"] + expected >= DAILY_BUDGET:
+        raise OverBudget("%.2f GB of the daily %.1f GB used" % (USAGE["bytes"] / 1e9, DAILY_BUDGET / 1e9))
+
+
 # ------------------------------------------------------------------ KMA API
 
+def http_failure(error):
+    """Raise for a 401/403: KMA's daily limit (OverBudget) or a rejected key (Failed)."""
+    if error.code not in (401, 403):
+        return
+    try:
+        message = error.read()[:500].decode("utf-8", "replace")
+    except Exception:  # noqa: BLE001
+        message = ""
+    if "제한" in message or "limit" in message.lower():
+        count_bytes(exhausted=True)
+        raise OverBudget("KMA daily limit reached (HTTP %d)" % error.code) from None
+    raise Failed("API key rejected (HTTP %d)" % error.code) from None
+
+
 def fetch(key, cycle, lead, name, data, level, window=WINDOW, size=(WIDTH, HEIGHT)):
+    """A field from the older binary API (now only the 1x1 probes)."""
     params = dict(group="KIMG", nwp="NE57", data=data, name=name, map="S", sub=window, tmfc=cycle,
                   hf=lead, disp="B", help=0, level=level)
     url = URL + "?" + urlencode(params) + "&authKey=" + key
@@ -107,22 +177,108 @@ def fetch(key, cycle, lead, name, data, level, window=WINDOW, size=(WIDTH, HEIGH
     for attempt, timeout in enumerate(ATTEMPT_TIMEOUTS):
         if attempt:
             time.sleep(1)
+        check_budget(0)
         try:
             with urlopen(Request(url, headers={"User-Agent": "kma-kim-relay"}), timeout=timeout) as response:
                 body = response.read()
         except HTTPError as error:
-            if error.code in (401, 403):
-                raise Failed("API key rejected (HTTP %d)" % error.code) from None
+            http_failure(error)
             last = "HTTP %d" % error.code
             continue
         except Exception as error:  # noqa: BLE001 - timeouts and network errors are retried
             last = redact(type(error).__name__ + ": " + str(error))[:100]
             continue
+        count_bytes(len(body))
         nx, ny = struct.unpack_from("<ii", body) if len(body) >= 8 else (0, 0)
         if (nx, ny) == size and len(body) == 8 + nx * ny * 4:
             return np.frombuffer(body, "<f4", offset=8).reshape(ny, nx)
         text = redact(body[:2000].decode("euc-kr", "replace"))
         if re.search(r"not exist", text, re.I):
+            raise Missing(text.strip()[:160])
+        last = "unexpected answer: " + text.strip()[:120]
+    raise Failed(last)
+
+
+def grib_values(body):
+    """The grid of a one-message GRIB2 (template 3.0, simple packing 5.0) as float32 (nj, ni),
+    south row first. KMA labels every variable as temperature (category 0, parameter 0), so
+    the message is read as the field that was asked for."""
+    if body[:4] != b"GRIB" or body[7] != 2:
+        raise ValueError("not GRIB2")
+    pos, ni, nj, packing, bitmap, packed = 16, 0, 0, None, None, None
+    while pos + 5 <= len(body) and body[pos:pos + 4] != b"7777":
+        length, number = struct.unpack_from(">IB", body, pos)
+        section = body[pos:pos + length]
+        if number == 3:
+            ni, nj = struct.unpack_from(">II", section, 30)
+            if not section[71] & 0x40:
+                raise ValueError("rows run north to south")
+        elif number == 5:
+            if struct.unpack_from(">H", section, 9)[0] != 0:
+                raise ValueError("packing template %d" % struct.unpack_from(">H", section, 9)[0])
+            ref = struct.unpack_from(">f", section, 11)[0]
+            e, d = struct.unpack_from(">HH", section, 15)
+            e = -(e & 0x7FFF) if e & 0x8000 else e
+            d = -(d & 0x7FFF) if d & 0x8000 else d
+            packing = ref, e, d, section[19]
+        elif number == 6 and section[5] == 0:
+            bitmap = np.unpackbits(np.frombuffer(section, np.uint8, offset=6))
+        elif number == 7:
+            packed = np.frombuffer(section, np.uint8, offset=5)
+        pos += length
+    if not ni or packing is None or packed is None:
+        raise ValueError("incomplete GRIB2")
+    ref, e, d, bits = packing
+    count = int(bitmap[:ni * nj].sum()) if bitmap is not None else ni * nj
+    if bits:
+        digits = np.unpackbits(packed)[:count * bits].reshape(count, bits).astype(np.int64)
+        scaled = digits.dot(1 << np.arange(bits - 1, -1, -1, dtype=np.int64))
+    else:
+        scaled = np.zeros(count, np.int64)
+    values = ((ref + scaled * 2.0 ** e) / 10.0 ** d).astype(np.float32)
+    if bitmap is not None:
+        grid = np.full(ni * nj, np.nan, np.float32)
+        grid[bitmap[:ni * nj].astype(bool)] = values
+        values = grid
+    return values.reshape(nj, ni)
+
+
+def fetch_grib(key, cycle, lead, name, data, level):
+    """A field of the window from the GRIB2 API, as the older API's (601, 721) float32."""
+    params = dict(group="KIMG", nwp="ne57", data=data, vars=name, tmfc=cycle, hf=lead,
+                  dataType="GB2", help=0, **BOX)
+    if data == "P":
+        params["lvl_lst"] = level
+    url = GRIB_URL + "?" + urlencode(params) + "&authKey=" + key
+    last = "no attempt"
+    for attempt, timeout in enumerate(GRIB_ATTEMPT_TIMEOUTS):
+        if attempt:
+            time.sleep(1)
+        check_budget()
+        try:
+            with urlopen(Request(url, headers={"User-Agent": "kma-kim-relay"}), timeout=timeout) as response:
+                body = response.read()
+        except HTTPError as error:
+            http_failure(error)
+            last = "HTTP %d" % error.code
+            continue
+        except Exception as error:  # noqa: BLE001 - timeouts and network errors are retried
+            last = redact(type(error).__name__ + ": " + str(error))[:100]
+            continue
+        count_bytes(len(body))
+        if body[:4] == b"GRIB":
+            try:
+                grid = grib_values(body)
+            except (ValueError, IndexError, struct.error) as error:
+                last = "bad GRIB2: %s" % error
+                continue
+            if grid.shape == (HEIGHT, WIDTH):
+                return grid
+            last = "unexpected grid %dx%d" % (grid.shape[1], grid.shape[0])
+            continue
+        text = redact(body[:2000].decode("utf-8", "replace"))
+        # "# ERROR: 파일 없음 (/ARCV/.../g576_..._prs.2byte.ft000.<cycle>.nc)"
+        if re.search(r"ERROR[^\n]*\(/[^)\n]*\.nc\)", text):
             raise Missing(text.strip()[:160])
         last = "unexpected answer: " + text.strip()[:120]
     raise Failed(last)
@@ -224,7 +380,7 @@ def fetch_lead(key, cycle, lead, have=None):
     """
     The fields of one lead (thinned) on top of `have`, the ones already published. Fields
     that fail are tried again in later rounds, a little apart, since KMA stalls come and go.
-    Raises Missing if KMA has not produced the lead yet.
+    Raises Missing if KMA has not produced the lead yet, OverBudget once today's volume is used.
     """
     grids = dict(have or {})
     todo = [spec for spec in FIELDS if (spec[0], spec[2]) not in grids]
@@ -232,18 +388,21 @@ def fetch_lead(key, cycle, lead, have=None):
         return grids, []
     fetch(key, cycle, lead, "hgt", "P", 500, window=PROBE_WINDOW, size=(1, 1))
     errors = {}
+    over = []
     lock = threading.Lock()
 
     def one(spec):
         name, data, level, _required, _decimals = spec
         try:
-            grid = fetch(key, cycle, lead, name, data, level)[::STRIDE, ::STRIDE].copy()
+            grid = fetch_grib(key, cycle, lead, name, data, level)[::STRIDE, ::STRIDE].copy()
             with lock:
                 grids[(name, level)] = grid
                 errors.pop((name, level), None)
         except (Missing, Failed) as error:
             with lock:
                 errors[(name, level)] = str(error)
+        except OverBudget as error:
+            over.append(error)
 
     for round_index, pause in enumerate(RETRY_ROUND_PAUSES):
         if round_index:
@@ -252,6 +411,8 @@ def fetch_lead(key, cycle, lead, have=None):
             time.sleep(pause)
         with ThreadPoolExecutor(WORKERS) as pool:
             list(pool.map(one, todo))
+        if over:
+            raise over[0]
         todo = [spec for spec in FIELDS if (spec[0], spec[2]) not in grids]
         if not todo:
             break
@@ -366,9 +527,22 @@ def drop_old_cycles(manifest, dry_run):
 
 # ------------------------------------------------------------------ main
 
-def run(key, cycle, leads, out_dir, dry_run, time_budget):
+def usage_unsaved(manifest):
+    """More than the probes' few bytes received since manifest.json last had the count."""
+    saved = manifest.get("usage") or {}
+    with USAGE_LOCK:
+        return saved.get("day") != USAGE["day"] or USAGE["bytes"] - saved.get("bytes", 0) > 1e6
+
+
+def publish_kim(manifest, folder, uploads, dry_run):
+    """publish() of manifest.json with today's KMA volume in it, for the next run to go on from."""
+    with USAGE_LOCK:
+        manifest["usage"] = dict(USAGE)
+    publish(manifest, folder, uploads, dry_run)
+
+
+def run(key, manifest, cycle, leads, out_dir, dry_run, time_budget):
     started = time.time()
-    manifest = load_manifest()
     entry = next((c for c in manifest["cycles"] if c["cycle"] == cycle), None)
     if entry is None:
         entry = {"cycle": cycle, "tag": "kim-" + cycle, "leads": {}}
@@ -379,7 +553,7 @@ def run(key, cycle, leads, out_dir, dry_run, time_budget):
     log("cycle", cycle, "to fetch:", todo)
     if not todo:
         if "manifest.json" in UNMIGRATED:
-            publish(manifest, out_dir, [], dry_run)
+            publish_kim(manifest, out_dir, [], dry_run)
         return 0
     if not dry_run:
         ensure_release(entry["tag"], "KIM " + cycle, ATTRIBUTION)
@@ -397,6 +571,9 @@ def run(key, cycle, leads, out_dir, dry_run, time_budget):
         except Missing:
             log("+%dh not produced yet" % lead)
             break
+        except OverBudget as error:
+            log("+%dh stopped: %s; the next run after midnight KST goes on" % (lead, error))
+            break
         except Failed as error:
             log("+%dh failed:" % lead, error)
             continue
@@ -413,7 +590,7 @@ def run(key, cycle, leads, out_dir, dry_run, time_budget):
         # used when the last one is in.
         entry["complete"] = is_complete(entry)
         drop_old_cycles(manifest, dry_run)
-        publish(manifest, out_dir, [(entry["tag"], str(file))], dry_run)
+        publish_kim(manifest, out_dir, [(entry["tag"], str(file))], dry_run)
         done += 1
         log("+%dh published: %d bytes, %.0f s%s" % (lead, file.stat().st_size, time.time() - lead_started,
                                                    ", missing " + ", ".join(missing) if missing else ""))
@@ -421,9 +598,10 @@ def run(key, cycle, leads, out_dir, dry_run, time_budget):
         # Gaps given up on with time: mark complete without a new bundle.
         entry["complete"] = True
         drop_old_cycles(manifest, dry_run)
-        publish(manifest, out_dir, [], dry_run)
-    elif "manifest.json" in UNMIGRATED and not done:
-        publish(manifest, out_dir, [], dry_run)
+        publish_kim(manifest, out_dir, [], dry_run)
+    elif ("manifest.json" in UNMIGRATED and not done) or usage_unsaved(manifest):
+        # Keep the count of fields fetched in vain too (failed leads, OverBudget mid-lead).
+        publish_kim(manifest, out_dir, [], dry_run)
     log("cycle %s %s" % (cycle, "complete" if entry.get("complete") else "not complete yet"))
     return done
 
@@ -440,6 +618,14 @@ def main():
     if not key:
         sys.exit("KMA_API_KEY is not set")
     leads = [int(item) for item in args.leads.split(",")] if args.leads else LEADS
+    manifest = load_manifest()
+    load_usage(manifest)
+    log("KMA volume today (KST %s): %.2f GB of %.1f GB" % (USAGE["day"], USAGE["bytes"] / 1e9, DAILY_BUDGET / 1e9))
+    try:
+        check_budget()
+    except OverBudget as error:
+        log("nothing fetched: %s; the next run after midnight KST goes on" % error)
+        return
     cycle = args.cycle
     if not cycle:
         cycle = None
@@ -451,13 +637,20 @@ def main():
             except Failed as error:
                 # KMA stalled even on the tiny probe: an older cycle is checked, this one next run.
                 log("could not tell whether %s exists: %s" % (candidate, error))
+            except OverBudget as error:
+                log("stopped: %s; the next run after midnight KST goes on" % error)
+                if usage_unsaved(manifest):
+                    with tempfile.TemporaryDirectory() as folder:
+                        publish_kim(manifest, folder, [], args.dry_run)
+                return
         if not cycle:
             log("no recent KIM cycle answered")
             return
     out_dir = args.out or tempfile.mkdtemp(prefix="kimr-")
     Path(out_dir).mkdir(parents=True, exist_ok=True)
     try:
-        log("published %d lead(s)" % run(key, cycle, leads, out_dir, args.dry_run, args.time_budget))
+        log("published %d lead(s)" % run(key, manifest, cycle, leads, out_dir, args.dry_run, args.time_budget))
+        log("KMA volume today: %.2f GB" % (USAGE["bytes"] / 1e9))
     finally:
         if not args.out:
             shutil.rmtree(out_dir, ignore_errors=True)
