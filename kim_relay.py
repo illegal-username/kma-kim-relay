@@ -82,9 +82,10 @@ KEEP_CYCLES = 3
 WORKERS = 6
 # A stalled KMA request usually answers at once when sent again, so attempts start short.
 ATTEMPT_TIMEOUTS = (8, 15, 30, 45)
-# The GRIB2 API takes up to a minute for a field it has not cut out yet (its gateway gives
-# 504 after 30 s) and then answers the same request at once.
-GRIB_ATTEMPT_TIMEOUTS = (30, 30, 45, 60)
+# The GRIB2 API answers within a second or not at all: about half the requests stall (its
+# gateway gives 504 after 30 s), and the same request sent again usually answers at once.
+# Waiting 30 s on each stall took 350-520 s a lead; 5 s attempts took 70 s (2026-10-26).
+GRIB_ATTEMPT_TIMEOUTS = (5, 5, 5, 5, 5, 10, 10, 20, 30)
 # KMA API허브 lets a general member receive 5 GB a day (reset at midnight KST); a 403 says
 # "일일 최대 호출 용량 제한" once it is used. The relay stops below that, at 4.9 GB, and the
 # next run after midnight KST goes on. The count is kept in manifest.json ("usage").
