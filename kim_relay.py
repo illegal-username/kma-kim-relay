@@ -471,7 +471,11 @@ def published_fields(tag, file):
 # ------------------------------------------------------------------ GitHub release storage
 
 def gh(*args, check=True):
-    return subprocess.run(["gh", *args, "-R", REPO], check=check, capture_output=True, text=True)
+    result = subprocess.run(["gh", *args, "-R", REPO], capture_output=True, text=True)
+    if check and result.returncode:
+        # gh's own message, which a CalledProcessError traceback leaves out.
+        raise RuntimeError("gh %s failed: %s" % (" ".join(args[:2]), result.stderr.strip()))
+    return result
 
 
 def load_manifest(name="manifest.json", attribution=ATTRIBUTION):
@@ -550,6 +554,10 @@ def is_complete(entry):
     return cycle_age_hours(entry["cycle"]) > GIVE_UP_HOURS or not any(item["missing"] for item in leads.values())
 
 
+def newest_complete(manifest):
+    return max((c["cycle"] for c in manifest["cycles"] if c.get("complete")), default="")
+
+
 def drop_old_cycles(manifest, dry_run):
     """Keep the cycles from the newest down to the newest complete one (the one the app shows)."""
     ordered = sorted(manifest["cycles"], key=lambda c: c["cycle"], reverse=True)
@@ -584,6 +592,10 @@ def publish_kim(manifest, folder, uploads, dry_run):
 def run(key, manifest, cycle, leads, out_dir, dry_run, time_budget, skip_past=True):
     started = time.time()
     entry = next((c for c in manifest["cycles"] if c["cycle"] == cycle), None)
+    if entry is None and cycle < newest_complete(manifest):
+        # drop_old_cycles() would delete its release again before the first upload.
+        log("cycle %s is older than complete cycle %s; nothing to fetch" % (cycle, newest_complete(manifest)))
+        return 0
     if entry is None:
         # The leads before "first" are never fetched for this cycle (the app starts there).
         entry = {"cycle": cycle, "tag": "kim-" + cycle, "first": first_lead(cycle) if skip_past else 0, "leads": {}}
@@ -672,6 +684,9 @@ def main():
     if not cycle:
         cycle = None
         for candidate in candidate_cycles():
+            if candidate < newest_complete(manifest):
+                # The app already shows a newer complete cycle: an older one is never needed.
+                break
             try:
                 if cycle_exists(key, candidate):
                     cycle = candidate
