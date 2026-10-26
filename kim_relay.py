@@ -244,8 +244,9 @@ def grib_values(body):
     return values.reshape(nj, ni)
 
 
-def fetch_grib(key, cycle, lead, name, data, level):
-    """A field of the window from the GRIB2 API, as the older API's (601, 721) float32."""
+def fetch_grib(key, cycle, lead, name, data, level, stats=None):
+    """A field of the window from the GRIB2 API, as the older API's (601, 721) float32.
+    Each attempt is added to `stats` as (outcome, seconds to the answer's headers)."""
     params = dict(group="KIMG", nwp="ne57", data=data, vars=name, tmfc=cycle, hf=lead,
                   dataType="GB2", help=0, **BOX)
     if data == "P":
@@ -256,16 +257,24 @@ def fetch_grib(key, cycle, lead, name, data, level):
         if attempt:
             time.sleep(1)
         check_budget()
+        sent = time.time()
+        outcome = "ok"
         try:
             with urlopen(Request(url, headers={"User-Agent": "kma-kim-relay"}), timeout=timeout) as response:
+                waited = time.time() - sent
                 body = response.read()
         except HTTPError as error:
+            outcome = "HTTP %d" % error.code
             http_failure(error)
-            last = "HTTP %d" % error.code
+            last = outcome
             continue
         except Exception as error:  # noqa: BLE001 - timeouts and network errors are retried
+            outcome = "stall" if "timed out" in str(error) else type(error).__name__
             last = redact(type(error).__name__ + ": " + str(error))[:100]
             continue
+        finally:
+            if stats is not None:
+                stats.append((outcome, waited if outcome == "ok" else time.time() - sent))
         count_bytes(len(body))
         if body[:4] == b"GRIB":
             try:
@@ -377,6 +386,21 @@ def read_bundle(data):
     return header, fields
 
 
+def log_attempts(lead, stats):
+    """One line on how KMA answered a lead's requests: where its time goes."""
+    if not stats:
+        return
+    answered = sorted(seconds for outcome, seconds in stats if outcome == "ok")
+    failed = {}
+    for outcome, seconds in stats:
+        if outcome != "ok":
+            failed.setdefault(outcome, []).append(seconds)
+    waits = ", ".join("%s %d (%.0f s)" % (outcome, len(times), sum(times)) for outcome, times in sorted(failed.items()))
+    log("+%dh requests: %d, answered %d (median %.1f s, max %.1f s, %.0f s in all)%s" % (
+        lead, len(stats), len(answered), answered[len(answered) // 2] if answered else 0,
+        answered[-1] if answered else 0, sum(answered), "; " + waits if waits else ""))
+
+
 def fetch_lead(key, cycle, lead, have=None):
     """
     The fields of one lead (thinned) on top of `have`, the ones already published. Fields
@@ -390,12 +414,13 @@ def fetch_lead(key, cycle, lead, have=None):
     fetch(key, cycle, lead, "hgt", "P", 500, window=PROBE_WINDOW, size=(1, 1))
     errors = {}
     over = []
+    stats = []
     lock = threading.Lock()
 
     def one(spec):
         name, data, level, _required, _decimals = spec
         try:
-            grid = fetch_grib(key, cycle, lead, name, data, level)[::STRIDE, ::STRIDE].copy()
+            grid = fetch_grib(key, cycle, lead, name, data, level, stats)[::STRIDE, ::STRIDE].copy()
             with lock:
                 grids[(name, level)] = grid
                 errors.pop((name, level), None)
@@ -405,18 +430,21 @@ def fetch_lead(key, cycle, lead, have=None):
         except OverBudget as error:
             over.append(error)
 
-    for round_index, pause in enumerate(RETRY_ROUND_PAUSES):
-        if round_index:
-            log("+%dh: %d field(s) again in %d s (%s)" % (
-                lead, len(todo), pause, ", ".join("%s %d" % (s[0], s[2]) for s in todo)))
-            time.sleep(pause)
-        with ThreadPoolExecutor(WORKERS) as pool:
-            list(pool.map(one, todo))
-        if over:
-            raise over[0]
-        todo = [spec for spec in FIELDS if (spec[0], spec[2]) not in grids]
-        if not todo:
-            break
+    try:
+        for round_index, pause in enumerate(RETRY_ROUND_PAUSES):
+            if round_index:
+                log("+%dh: %d field(s) again in %d s (%s)" % (
+                    lead, len(todo), pause, ", ".join("%s %d" % (s[0], s[2]) for s in todo)))
+                time.sleep(pause)
+            with ThreadPoolExecutor(WORKERS) as pool:
+                list(pool.map(one, todo))
+            if over:
+                raise over[0]
+            todo = [spec for spec in FIELDS if (spec[0], spec[2]) not in grids]
+            if not todo:
+                break
+    finally:
+        log_attempts(lead, stats)
     required = [(name, level) for name, _d, level, req, _q in FIELDS if req and (name, level) not in grids]
     missing = ["%s %d" % (name, level) for name, _d, level, _r, _q in FIELDS if (name, level) not in grids]
     if required:
@@ -613,7 +641,7 @@ def main():
     parser.add_argument("--leads", help="comma separated; default: 0-48 h every 3 h")
     parser.add_argument("--out", help="keep the bundles in this folder")
     parser.add_argument("--dry-run", action="store_true", help="do not touch GitHub releases")
-    parser.add_argument("--time-budget", type=float, default=40 * 60, help="seconds")
+    parser.add_argument("--time-budget", type=float, default=45 * 60, help="seconds")
     args = parser.parse_args()
     key = os.environ.get("KMA_API_KEY", "").strip()
     if not key:
