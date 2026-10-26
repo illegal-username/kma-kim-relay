@@ -97,6 +97,10 @@ RETRY_ROUND_PAUSES = (0, 15, 45, 90)
 # be marked complete (the app shows the gap) rather than block the app on older data.
 GIVE_UP_HOURS = 10
 AVAILABILITY_LAG_HOURS = 3
+# Times already past are of no use: the app shows a cycle from the time nearest to now on.
+# A new cycle is fetched from the time nearest to an hour from now (it is complete and shown
+# about then), which skips +0 h and +3 h of a cycle found 4-5 h after it ran.
+FIRST_LEAD_AHEAD_HOURS = 1
 PROBE_CANDIDATES = 3
 
 
@@ -531,10 +535,17 @@ def cycle_age_hours(cycle):
     return (datetime.now(timezone.utc) - start).total_seconds() / 3600
 
 
+def first_lead(cycle):
+    """The lead nearest to FIRST_LEAD_AHEAD_HOURS from now (the last one once all are past)."""
+    steps = int((cycle_age_hours(cycle) + FIRST_LEAD_AHEAD_HOURS) / 3 + 0.5)
+    return LEADS[max(0, min(len(LEADS) - 1, steps))]
+
+
 def is_complete(entry):
-    """Every lead is published with every field, or the rest are given up (GIVE_UP_HOURS)."""
+    """Every lead from the entry's first is published with every field, or the rest are given
+    up (GIVE_UP_HOURS)."""
     leads = entry["leads"]
-    if any(str(lead) not in leads for lead in LEADS):
+    if any(str(lead) not in leads for lead in LEADS if lead >= entry.get("first", 0)):
         return False
     return cycle_age_hours(entry["cycle"]) > GIVE_UP_HOURS or not any(item["missing"] for item in leads.values())
 
@@ -570,15 +581,17 @@ def publish_kim(manifest, folder, uploads, dry_run):
     publish(manifest, folder, uploads, dry_run)
 
 
-def run(key, manifest, cycle, leads, out_dir, dry_run, time_budget):
+def run(key, manifest, cycle, leads, out_dir, dry_run, time_budget, skip_past=True):
     started = time.time()
     entry = next((c for c in manifest["cycles"] if c["cycle"] == cycle), None)
     if entry is None:
-        entry = {"cycle": cycle, "tag": "kim-" + cycle, "leads": {}}
+        # The leads before "first" are never fetched for this cycle (the app starts there).
+        entry = {"cycle": cycle, "tag": "kim-" + cycle, "first": first_lead(cycle) if skip_past else 0, "leads": {}}
         manifest["cycles"].append(entry)
     # Bundles of an older field list (no "fields" count) get the new fields added too.
-    todo = [lead for lead in leads if str(lead) not in entry["leads"] or entry["leads"][str(lead)]["missing"]
-            or entry["leads"][str(lead)].get("fields", 0) < len(FIELDS)]
+    todo = [lead for lead in leads if (not skip_past or lead >= entry.get("first", 0))
+            and (str(lead) not in entry["leads"] or entry["leads"][str(lead)]["missing"]
+                 or entry["leads"][str(lead)].get("fields", 0) < len(FIELDS))]
     log("cycle", cycle, "to fetch:", todo)
     if not todo:
         if "manifest.json" in UNMIGRATED:
@@ -678,7 +691,9 @@ def main():
     out_dir = args.out or tempfile.mkdtemp(prefix="kimr-")
     Path(out_dir).mkdir(parents=True, exist_ok=True)
     try:
-        log("published %d lead(s)" % run(key, manifest, cycle, leads, out_dir, args.dry_run, args.time_budget))
+        # Leads asked for by name are fetched even if past.
+        log("published %d lead(s)" % run(key, manifest, cycle, leads, out_dir, args.dry_run, args.time_budget,
+                                         skip_past=not args.leads))
         log("KMA volume today: %.2f GB" % (USAGE["bytes"] / 1e9))
     finally:
         if not args.out:
