@@ -485,6 +485,10 @@ def load_manifest(name="manifest.json", attribution=ATTRIBUTION):
                             capture_output=True, text=True, encoding="utf-8")
     if result.returncode == 0 and result.stdout.startswith("{"):
         return json.loads(result.stdout)
+    if "HTTP 404" not in result.stderr:
+        # GitHub is failing (e.g. 500), not missing the branch: starting from an
+        # empty manifest would drop the cycles and the day's KMA volume.
+        raise RuntimeError("cannot read %s: %s" % (name, result.stderr.strip() or result.stdout[:200]))
     UNMIGRATED.add(name)
     with tempfile.TemporaryDirectory() as folder:
         result = gh("release", "download", INDEX_TAG, "-p", name, "-D", folder, check=False)
