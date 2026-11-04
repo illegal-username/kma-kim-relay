@@ -171,4 +171,4 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(relay.exit_quietly_if_github_down(main))

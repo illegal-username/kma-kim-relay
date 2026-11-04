@@ -124,6 +124,27 @@ class OverBudget(Exception):
     """Today's KMA volume (DAILY_BUDGET, or KMA's own limit) is used up."""
 
 
+class GitHubDown(RuntimeError):
+    """GitHub answered with a server error: the next run tries again."""
+
+
+GITHUB_DOWN = re.compile(r"HTTP 5\d\d|50[0234]|Internal Server Error|Bad Gateway|Service Unavailable"
+                         r"|Gateway Time-?out|unexpected disconnect|Could not resolve host|timed out", re.I)
+
+
+def github_error(message):
+    return (GitHubDown if GITHUB_DOWN.search(message) else RuntimeError)(message)
+
+
+def exit_quietly_if_github_down(main):
+    """Run main(); a GitHub outage ends the run with a warning, not a failure (and its email)."""
+    try:
+        return main()
+    except GitHubDown as error:
+        print("::warning::GitHub is failing, the next run tries again: %s" % str(error).splitlines()[0], flush=True)
+        return 0
+
+
 # ------------------------------------------------------------------ daily volume
 
 def kst_day():
@@ -474,7 +495,7 @@ def gh(*args, check=True):
     result = subprocess.run(["gh", *args, "-R", REPO], capture_output=True, text=True)
     if check and result.returncode:
         # gh's own message, which a CalledProcessError traceback leaves out.
-        raise RuntimeError("gh %s failed: %s" % (" ".join(args[:2]), result.stderr.strip()))
+        raise github_error("gh %s failed: %s" % (" ".join(args[:2]), result.stderr.strip()))
     return result
 
 
@@ -488,7 +509,7 @@ def load_manifest(name="manifest.json", attribution=ATTRIBUTION):
     if "HTTP 404" not in result.stderr:
         # GitHub is failing (e.g. 500), not missing the branch: starting from an
         # empty manifest would drop the cycles and the day's KMA volume.
-        raise RuntimeError("cannot read %s: %s" % (name, result.stderr.strip() or result.stdout[:200]))
+        raise github_error("cannot read %s: %s" % (name, result.stderr.strip() or result.stdout[:200]))
     UNMIGRATED.add(name)
     with tempfile.TemporaryDirectory() as folder:
         result = gh("release", "download", INDEX_TAG, "-p", name, "-D", folder, check=False)
@@ -531,11 +552,18 @@ def push_manifest(path, name):
             ["push", "-q", "--force", url, "HEAD:refs/heads/" + branch],
         ]
         for step in steps:
-            result = subprocess.run(["git", *step], cwd=repo, capture_output=True, text=True)
-            if result.returncode:
+            # A push GitHub answers with a server error is tried again, 4 times in all.
+            for wait in [10, 30, 60, None]:
+                result = subprocess.run(["git", *step], cwd=repo, capture_output=True, text=True)
+                if not result.returncode:
+                    break
                 # The push URL holds the token: report the step, not the command.
-                raise RuntimeError("git %s failed: %s" % (step[0] if step[0] != "-c" else "commit",
-                                                         result.stderr.replace(token, "***") if token else result.stderr))
+                error = github_error("git %s failed: %s" % (step[0] if step[0] != "-c" else "commit",
+                                                           result.stderr.replace(token, "***") if token else result.stderr))
+                if step[0] != "push" or not isinstance(error, GitHubDown) or wait is None:
+                    raise error
+                log("git push failed, again in %d s: %s" % (wait, result.stderr.strip().splitlines()[0]))
+                time.sleep(wait)
 
 
 def cycle_age_hours(cycle):
@@ -720,4 +748,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(exit_quietly_if_github_down(main))
