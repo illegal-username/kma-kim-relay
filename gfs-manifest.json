@@ -1,0 +1,99 @@
+{
+ "format": 1,
+ "attribution": "NOAA/NCEP GFS 0.25° (public domain). NOMADS grib filter에서 동아시아 영역(100–160°E, 5–55°N)을 받아 그대로 올린 GRIB2입니다. NOAA가 이 저장소나 앱을 보증하지 않습니다.",
+ "cycles": [
+  {
+   "cycle": "2026110712",
+   "tag": "gfs-2026110712",
+   "leads": {
+    "0": {
+     "file": "gfs-2026110712-f000-v1.grib2",
+     "bytes": 3750859,
+     "missing": []
+    },
+    "3": {
+     "file": "gfs-2026110712-f003-v1.grib2",
+     "bytes": 3738749,
+     "missing": []
+    },
+    "6": {
+     "file": "gfs-2026110712-f006-v1.grib2",
+     "bytes": 3738749,
+     "missing": []
+    },
+    "9": {
+     "file": "gfs-2026110712-f009-v1.grib2",
+     "bytes": 3726639,
+     "missing": []
+    },
+    "12": {
+     "file": "gfs-2026110712-f012-v1.grib2",
+     "bytes": 3732694,
+     "missing": []
+    },
+    "15": {
+     "file": "gfs-2026110712-f015-v1.grib2",
+     "bytes": 3744804,
+     "missing": []
+    },
+    "18": {
+     "file": "gfs-2026110712-f018-v1.grib2",
+     "bytes": 3738749,
+     "missing": []
+    },
+    "21": {
+     "file": "gfs-2026110712-f021-v1.grib2",
+     "bytes": 3769024,
+     "missing": []
+    },
+    "24": {
+     "file": "gfs-2026110712-f024-v1.grib2",
+     "bytes": 3769024,
+     "missing": []
+    },
+    "27": {
+     "file": "gfs-2026110712-f027-v1.grib2",
+     "bytes": 3769024,
+     "missing": []
+    },
+    "30": {
+     "file": "gfs-2026110712-f030-v1.grib2",
+     "bytes": 3793244,
+     "missing": []
+    },
+    "33": {
+     "file": "gfs-2026110712-f033-v1.grib2",
+     "bytes": 3817464,
+     "missing": []
+    },
+    "36": {
+     "file": "gfs-2026110712-f036-v1.grib2",
+     "bytes": 3805354,
+     "missing": []
+    },
+    "39": {
+     "file": "gfs-2026110712-f039-v1.grib2",
+     "bytes": 3847739,
+     "missing": []
+    },
+    "42": {
+     "file": "gfs-2026110712-f042-v1.grib2",
+     "bytes": 3853794,
+     "missing": []
+    },
+    "45": {
+     "file": "gfs-2026110712-f045-v1.grib2",
+     "bytes": 3841684,
+     "missing": []
+    },
+    "48": {
+     "file": "gfs-2026110712-f048-v1.grib2",
+     "bytes": 3865904,
+     "missing": []
+    }
+   },
+   "complete": true
+  }
+ ],
+ "updated": "2026-11-07T15:50:23+00:00"
+}
