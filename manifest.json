@@ -1,0 +1,109 @@
+{
+ "format": 1,
+ "attribution": "출처: 기상청 (KIM 전구모델 KIMG/NE57, 기상청 API허브 수치모델 자료). kma-kim-relay에서 재가공: 동아시아 영역을 1/12° 격자에서 3칸 간격(0.25°)으로 추출하고 16비트로 양자화해 압축했습니다. 원자료와 다르며 공식 예보가 아닙니다.",
+ "cycles": [
+  {
+   "cycle": "2026112812",
+   "tag": "kim-2026112812",
+   "first": 6,
+   "leads": {
+    "6": {
+     "file": "kim-2026112812-f006-fd222607.kimr",
+     "bytes": 2175435,
+     "missing": [],
+     "fields": 47
+    },
+    "9": {
+     "file": "kim-2026112812-f009-e56dae8e.kimr",
+     "bytes": 2187172,
+     "missing": [],
+     "fields": 47
+    },
+    "12": {
+     "file": "kim-2026112812-f012-95b9f447.kimr",
+     "bytes": 2190682,
+     "missing": [],
+     "fields": 47
+    },
+    "15": {
+     "file": "kim-2026112812-f015-e63040a9.kimr",
+     "bytes": 2176550,
+     "missing": [],
+     "fields": 47
+    },
+    "21": {
+     "file": "kim-2026112812-f021-e5a58352.kimr",
+     "bytes": 2164042,
+     "missing": [],
+     "fields": 47
+    },
+    "24": {
+     "file": "kim-2026112812-f024-1203dbc6.kimr",
+     "bytes": 2168041,
+     "missing": [],
+     "fields": 47
+    },
+    "27": {
+     "file": "kim-2026112812-f027-09430305.kimr",
+     "bytes": 2163165,
+     "missing": [],
+     "fields": 47
+    },
+    "30": {
+     "file": "kim-2026112812-f030-c75472aa.kimr",
+     "bytes": 2158952,
+     "missing": [],
+     "fields": 47
+    },
+    "33": {
+     "file": "kim-2026112812-f033-0f88a556.kimr",
+     "bytes": 2149259,
+     "missing": [],
+     "fields": 47
+    },
+    "36": {
+     "file": "kim-2026112812-f036-01d571fd.kimr",
+     "bytes": 2140486,
+     "missing": [],
+     "fields": 47
+    },
+    "39": {
+     "file": "kim-2026112812-f039-4f8502f5.kimr",
+     "bytes": 2128520,
+     "missing": [],
+     "fields": 47
+    },
+    "42": {
+     "file": "kim-2026112812-f042-ca13265a.kimr",
+     "bytes": 2120312,
+     "missing": [],
+     "fields": 47
+    },
+    "45": {
+     "file": "kim-2026112812-f045-1f4e543a.kimr",
+     "bytes": 2123649,
+     "missing": [],
+     "fields": 47
+    },
+    "18": {
+     "file": "kim-2026112812-f018-49dfedb3.kimr",
+     "bytes": 2167337,
+     "missing": [],
+     "fields": 47
+    },
+    "48": {
+     "file": "kim-2026112812-f048-9ed6d504.kimr",
+     "bytes": 2136803,
+     "missing": [],
+     "fields": 47
+    }
+   },
+   "complete": true
+  }
+ ],
+ "updated": "2026-11-28T16:44:47+00:00",
+ "usage": {
+  "day": "2026-11-29",
+  "bytes": 1032445608
+ }
+}
